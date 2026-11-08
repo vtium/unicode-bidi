@@ -940,6 +940,12 @@ fn reorder_line(
 /// [Rule L3]: https://www.unicode.org/reports/tr9/#L3
 /// [Rule L4]: https://www.unicode.org/reports/tr9/#L4
 fn visual_runs_for_line(levels: Vec<Level>, line: &Range<usize>) -> (Vec<Level>, Vec<LevelRun>) {
+    // An empty line has no level runs. It may start at the end of the text,
+    // or the text may be empty, so `levels[line.start]` may not exist.
+    if line.is_empty() {
+        return (levels, Vec::new());
+    }
+
     // Find consecutive level runs.
     let mut runs = Vec::new();
     let mut start = line.start;
@@ -2116,6 +2122,43 @@ mod tests {
         assert_eq!(bidi16.levels[digit16].number(), 126);
         let (_, runs16) = bidi16.visual_runs(&bidi16.paragraphs[0], digit16..digit16 + 1);
         assert_eq!(runs16, vec![digit16..digit16 + 1]);
+    }
+
+    #[test]
+    #[cfg(feature = "hardcoded-data")]
+    // An empty line has no level runs, wherever it starts: at the end of the
+    // text, in an empty text, or inside the text. `visual_runs` and
+    // `reorder_line` must not index past the end of the levels.
+    fn test_visual_runs_empty_line() {
+        let empty: Vec<LevelRun> = Vec::new();
+        let cases: &[(&str, Range<usize>)] =
+            &[("abc\u{05D0}", 5..5), ("abc\u{05D0}", 3..3), ("", 0..0), ("a\u{05D0}b", 1..1)];
+        for &(text, ref line) in cases {
+            let bidi = BidiInfo::new(text, None);
+            if let Some(para) = bidi.paragraphs.first() {
+                let (_, runs) = bidi.visual_runs(para, line.clone());
+                assert_eq!(runs, empty, "{:?} {:?}", text, line);
+                assert_eq!(bidi.reorder_line(para, line.clone()), "");
+            }
+
+            let para = ParagraphBidiInfo::new(text, None);
+            let (_, runs) = para.visual_runs(line.clone());
+            assert_eq!(runs, empty, "{:?} {:?}", text, line);
+            assert_eq!(para.reorder_line(line.clone()), "");
+
+            let text16 = to_utf16(text);
+            let line16 = to_utf16(&text[..line.start]).len()..to_utf16(&text[..line.end]).len();
+            let bidi16 = BidiInfoU16::new(&text16, None);
+            if let Some(para16) = bidi16.paragraphs.first() {
+                let (_, runs16) = bidi16.visual_runs(para16, line16.clone());
+                assert_eq!(runs16, empty, "{:?} {:?}", text, line16);
+                assert!(bidi16.reorder_line(para16, line16.clone()).is_empty());
+            }
+            let para16 = ParagraphBidiInfoU16::new(&text16, None);
+            let (_, runs16) = para16.visual_runs(line16.clone());
+            assert_eq!(runs16, empty, "{:?} {:?}", text, line16);
+            assert!(para16.reorder_line(line16).is_empty());
+        }
     }
 
     #[test]

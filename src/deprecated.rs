@@ -29,6 +29,12 @@ pub fn visual_runs(line: Range<usize>, levels: &[Level]) -> Vec<LevelRun> {
     assert!(line.start <= levels.len());
     assert!(line.end <= levels.len());
 
+    // An empty line has no level runs. It may start at the end of `levels`,
+    // so `levels[line.start]` may not exist.
+    if line.is_empty() {
+        return Vec::new();
+    }
+
     let mut runs = Vec::new();
 
     // Find consecutive level runs.
@@ -106,5 +112,21 @@ mod tests {
         #[allow(deprecated)]
         let runs = visual_runs(0..1, &[Level::new(126).unwrap()]);
         assert_eq!(runs, vec![0..1]);
+    }
+
+    #[test]
+    // An empty line has no level runs, even at the end of the levels or in
+    // empty levels, where `levels[line.start]` does not exist.
+    fn test_visual_runs_empty_line() {
+        let levels = [Level::ltr(), Level::rtl()];
+        #[allow(deprecated)]
+        let at_end = visual_runs(2..2, &levels);
+        assert_eq!(at_end, vec![]);
+        #[allow(deprecated)]
+        let inside = visual_runs(1..1, &levels);
+        assert_eq!(inside, vec![]);
+        #[allow(deprecated)]
+        let in_empty = visual_runs(0..0, &[]);
+        assert_eq!(in_empty, vec![]);
     }
 }
