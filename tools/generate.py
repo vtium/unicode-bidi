@@ -20,9 +20,12 @@ DATA_DIR = 'data/ucd'
 TESTS_DATA_DIR = 'tests/data'
 README_NAME = "ReadMe.txt"
 UNICODE_DATA_NAME = "UnicodeData.txt"
+DERIVED_BIDI_CLASS_NAME = "extracted/DerivedBidiClass.txt"
 BIDI_BRACKETS_NAME = "BidiBrackets.txt"
-# UNIDATA_SOURCE = "14.0.0/ucd" # For fetching a particular version
-UNIDATA_SOURCE = "UNIDATA" # For fetching the latest
+# The Unicode version the tables and the test data are generated from.
+# Delete data/ucd and tests/data before changing it, since files already
+# there are not fetched again.
+UNIDATA_SOURCE = "18.0.0/ucd"
 TABLES_PATH = os.path.join("src", "char_data", "tables.rs")
 
 PREAMBLE = '''// NOTE:
@@ -37,7 +40,7 @@ surrogate_codepoints = (0xD800, 0xDFFF)
 
 def fetch(name, dst):
     if not os.path.exists(dst):
-        os.system("curl -o '%s' 'http://www.unicode.org/Public/%s/%s'" % (dst, UNIDATA_SOURCE, name))
+        os.system("curl -fsSL -o '%s' 'https://www.unicode.org/Public/%s/%s'" % (dst, UNIDATA_SOURCE, name))
     if not os.path.exists(dst):
         sys.stderr.write("cannot fetch %s" % name)
         exit(1)
@@ -51,7 +54,7 @@ def fetch_test_data(name):
     fetch(name, dst)
 
 def open_data(name):
-    return open(os.path.join(DATA_DIR, name))
+    return open(os.path.join(DATA_DIR, os.path.basename(name)))
 
 def is_surrogate(n):
     return surrogate_codepoints[0] <= n <= surrogate_codepoints[1]
@@ -81,61 +84,74 @@ def load_bidi_pairs(on_decomps):
 # on bidi properties
 def load_unicode_data():
     fetch_data(UNICODE_DATA_NAME)
-    udict = {};
-    # Decompositions of all ON characters that have them
+    # Decompositions of all characters that have a canonical one
     on_decomps = {}
-
-    range_start = -1;
     for line in fileinput.input(os.path.join(DATA_DIR, UNICODE_DATA_NAME)):
-        data = line.split(';');
+        data = line.split(';')
         if len(data) != 15:
             continue
-        cp = int(data[0], 16);
-        if is_surrogate(cp):
-            continue
-        if range_start >= 0:
-            for i in range(range_start, cp):
-                udict[i] = data;
-            range_start = -1;
-        if data[1].endswith(", First>"):
-            range_start = cp;
-            continue;
-        udict[cp] = data;
-
-    # Mapping of code point to Bidi_Class property:
-    bidi_class = {}
-
-    for code in udict:
-        [code_org, name, gencat, combine, bidi,
-         decomp, deci, digit, num, mirror,
-         old, iso, upcase, lowcase, titlecase ] = udict[code];
-
-        if bidi not in bidi_class:
-            bidi_class[bidi] = []
+        decomp = data[5]
         if len(decomp) != 0 and " " not in decomp:
-            on_decomps[code] = decomp
-        bidi_class[bidi].append(code)
+            on_decomps[int(data[0], 16)] = decomp
 
-    # Default Bidi_Class for unassigned codepoints.
-    # <http://www.unicode.org/Public/UNIDATA/extracted/DerivedBidiClass.txt>
-    default_ranges = [
-        (0x0600, 0x07BF, "AL"), (0x08A0, 0x08FF, "AL"),
-        (0xFB50, 0xFDCF, "AL"), (0xFDF0, 0xFDFF, "AL"),
-        (0xFE70, 0xFEFF, "AL"), (0x1EE00, 0x1EEFF, "AL"),
+    return (group_categories(load_bidi_classes()), on_decomps)
 
-        (0x0590, 0x05FF, "R"), (0x07C0, 0x089F, "R"),
-        (0xFB1D, 0xFB4F, "R"), (0x10800, 0x10FFF, "R"),
-        (0x1E800, 0x1EDFF, "R"), (0x1EF00, 0x1EFFF, "R"),
+# Returns a map from each Bidi_Class value to the codepoints that have it,
+# for every codepoint except the surrogates.
+#
+# DerivedBidiClass.txt gives the default value of the unassigned codepoints
+# in its @missing lines, a later line overriding an earlier one where they
+# overlap, and the value of every other codepoint in its data lines.
+# <https://www.unicode.org/reports/tr44/#Missing_Conventions>
+def load_bidi_classes():
+    fetch_data(DERIVED_BIDI_CLASS_NAME)
+    long_names = {
+        "Arabic_Letter": "AL", "Arabic_Number": "AN",
+        "Paragraph_Separator": "B", "Boundary_Neutral": "BN",
+        "Common_Separator": "CS", "European_Number": "EN",
+        "European_Separator": "ES", "European_Terminator": "ET",
+        "First_Strong_Isolate": "FSI", "Left_To_Right": "L",
+        "Left_To_Right_Embedding": "LRE", "Left_To_Right_Isolate": "LRI",
+        "Left_To_Right_Override": "LRO", "Nonspacing_Mark": "NSM",
+        "Other_Neutral": "ON", "Pop_Directional_Format": "PDF",
+        "Pop_Directional_Isolate": "PDI", "Right_To_Left": "R",
+        "Right_To_Left_Embedding": "RLE", "Right_To_Left_Isolate": "RLI",
+        "Right_To_Left_Override": "RLO", "Segment_Separator": "S",
+        "White_Space": "WS",
+    }
 
-        (0x20A0, 0x20CF, "ET"),
-    ]
+    def parse(fields):
+        cps, value = [f.strip() for f in fields.split(';')[:2]]
+        value = long_names.get(value, value)
+        assert value in long_names.values(), value
+        bounds = cps.split('..')
+        start = int(bounds[0], 16)
+        end = int(bounds[-1], 16)
+        return (start, end, value)
 
-    for (start, end, default) in default_ranges:
-        for code in range(start, end+1):
-            if not code in udict:
-                bidi_class[default].append(code)
+    missing = []
+    assigned = []
+    with open_data(DERIVED_BIDI_CLASS_NAME) as f:
+        for line in f:
+            if line.startswith("# @missing:"):
+                missing.append(parse(line[len("# @missing:"):].split('#')[0]))
+                continue
+            line = line.split('#')[0].strip()
+            if line:
+                assigned.append(parse(line))
+    assert missing, "DerivedBidiClass.txt has no @missing lines"
 
-    return (group_categories(bidi_class), on_decomps)
+    value_of = {}
+    for (start, end, value) in missing + assigned:
+        for code in range(start, end + 1):
+            value_of[code] = value
+
+    bidi_class = {}
+    for code in range(0, 0x110000):
+        if is_surrogate(code):
+            continue
+        bidi_class.setdefault(value_of[code], []).append(code)
+    return bidi_class
 
 def group_categories(cats):
     cats_out = []
@@ -241,7 +257,7 @@ use self::BidiClass::*;
 def get_unicode_version():
     fetch_data(README_NAME)
     with open_data(README_NAME) as readme:
-        pattern = "for Version (\d+)\.(\d+)\.(\d+) of the Unicode"
+        pattern = r"for [Vv]ersion (\d+)\.(\d+)\.(\d+) of the\s+Unicode"
         return re.search(pattern, readme.read()).groups()
 
 if __name__ == "__main__":

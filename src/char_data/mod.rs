@@ -134,13 +134,13 @@ mod tests {
         assert_eq!(bidi_class('\u{FEFE}'), AL);
         assert_eq!(bidi_class('\u{FEFF}'), BN);
 
-        // noncharacters
-        assert_eq!(bidi_class('\u{FDD0}'), L);
-        assert_eq!(bidi_class('\u{FDD1}'), L);
-        assert_eq!(bidi_class('\u{FDEE}'), L);
-        assert_eq!(bidi_class('\u{FDEF}'), L);
-        assert_eq!(bidi_class('\u{FFFE}'), L);
-        assert_eq!(bidi_class('\u{FFFF}'), L);
+        // noncharacters, which DerivedBidiClass.txt's @missing lines give BN
+        assert_eq!(bidi_class('\u{FDD0}'), BN);
+        assert_eq!(bidi_class('\u{FDD1}'), BN);
+        assert_eq!(bidi_class('\u{FDEE}'), BN);
+        assert_eq!(bidi_class('\u{FDEF}'), BN);
+        assert_eq!(bidi_class('\u{FFFE}'), BN);
+        assert_eq!(bidi_class('\u{FFFF}'), BN);
     }
 
     #[test]
